@@ -270,7 +270,7 @@ class SolrSearchBackend(BaseSearchBackend):
 
         return kwargs
 
-    def more_like_this(self, model_instance, additional_query_string=None,
+    def more_like_this(self, model_instance, additional_queries=set(),
                        start_offset=0, end_offset=None, models=None,
                        limit_to_registered_models=None, result_class=None, **kwargs):
         from haystack import connections
@@ -311,8 +311,8 @@ class SolrSearchBackend(BaseSearchBackend):
 
             narrow_queries.add('%s:(%s)' % (DJANGO_CT, ' OR '.join(model_choices)))
 
-        if additional_query_string:
-            narrow_queries.add(additional_query_string)
+        if additional_queries:
+            narrow_queries = narrow_queries.union(additional_queries)
 
         if narrow_queries:
             params['fq'] = list(narrow_queries)
