@@ -330,6 +330,69 @@ class SolrSearchBackend(BaseSearchBackend):
 
         return self._process_results(raw_results, result_class=result_class)
 
+
+    def more_like_this_stream_body(self, model_instance, stream_body, additional_queries=set(),
+                       start_offset=0, end_offset=None, models=None,
+                       limit_to_registered_models=None, result_class=None, ** kwargs):
+
+        from haystack import connections
+
+        # Deferred models will have a different class ("RealClass_Deferred_fieldname")
+        # which won't be in our registry:
+        model_klass = model_instance._meta.concrete_model
+
+        index = connections[self.connection_alias].get_unified_index().get_index(model_klass)
+        field_name = index.get_content_field()
+        params = {
+            'fl': '*,score',
+        }
+
+        if start_offset is not None:
+            params['start'] = start_offset
+
+        if end_offset is not None:
+            params['rows'] = end_offset
+
+        narrow_queries = set()
+
+        if limit_to_registered_models is None:
+            limit_to_registered_models = getattr(settings, 'HAYSTACK_LIMIT_TO_REGISTERED_MODELS', True)
+
+        if models and len(models):
+            model_choices = sorted(['%s.%s' % (model._meta.app_label, model._meta.module_name) for model in models])
+        elif limit_to_registered_models:
+            # Using narrow queries, limit the results to only models handled
+            # with the current routers.
+            model_choices = self.build_models_list()
+        else:
+            model_choices = []
+
+        if len(model_choices) > 0:
+            if narrow_queries is None:
+                narrow_queries = set()
+
+            narrow_queries.add('%s:(%s)' % (DJANGO_CT, ' OR '.join(model_choices)))
+
+        if additional_queries:
+            narrow_queries = narrow_queries.union(additional_queries)
+
+        if narrow_queries:
+            params['fq'] = list(narrow_queries)
+
+        # query = "%s:%s" % (ID, get_identifier(model_instance))
+
+        try:
+            raw_results = self.conn.more_like_this_stream_body(stream_body, field_name, **params)
+        except (IOError, SolrError) as e:
+            if not self.silently_fail:
+                raise
+
+            self.log.error("Failed to fetch More Like This from Solr for document '%s': %s", query, e)
+            raw_results = EmptyResults()
+
+        return self._process_results(raw_results, result_class=result_class)
+
+
     def _process_results(self, raw_results, highlight=False, result_class=None, distance_point=None):
         from haystack import connections
         results = []
